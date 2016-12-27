@@ -63,7 +63,7 @@ public abstract class HystrixThreadPoolProperties {
     private final HystrixProperty<Integer> keepAliveTime;
     private final HystrixProperty<Integer> maxQueueSize;
     private final HystrixProperty<Integer> queueSizeRejectionThreshold;
-    private final boolean allowMaximumSizeToDivergeFromCoreSize;
+    private final HystrixProperty<Boolean> allowMaximumSizeToDivergeFromCoreSize;
 
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowInMilliseconds;
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowBuckets;
@@ -77,7 +77,7 @@ public abstract class HystrixThreadPoolProperties {
     }
 
     protected HystrixThreadPoolProperties(HystrixThreadPoolKey key, Setter builder, String propertyPrefix) {
-        this.allowMaximumSizeToDivergeFromCoreSize = getValueOnce(propertyPrefix, key, "allowMaximumSizeToDivergeFromCoreSize",
+        this.allowMaximumSizeToDivergeFromCoreSize = getProperty(propertyPrefix, key, "allowMaximumSizeToDivergeFromCoreSize",
                 builder.getAllowMaximumSizeToDivergeFromCoreSize(), default_allow_maximum_size_to_diverge_from_core_size);
 
         this.corePoolSize = getProperty(propertyPrefix, key, "coreSize", builder.getCoreSize(), default_coreSize);
@@ -99,12 +99,11 @@ public abstract class HystrixThreadPoolProperties {
                 .build();
     }
 
-    private static boolean getValueOnce(String propertyPrefix, HystrixThreadPoolKey key, String instanceProperty, boolean builderOverrideValue, boolean defaultValue) {
+    private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixThreadPoolKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
         return forBoolean()
                 .add(propertyPrefix + ".threadpool." + key.name() + "." + instanceProperty, builderOverrideValue)
                 .add(propertyPrefix + ".threadpool.default." + instanceProperty, defaultValue)
-                .build()
-                .get();
+                .build();
     }
 
     /**
@@ -117,12 +116,37 @@ public abstract class HystrixThreadPoolProperties {
     }
 
     /**
-     * Maximum thread-pool size that gets passed to {@link ThreadPoolExecutor#setMaximumPoolSize(int)}
+     * Maximum thread-pool size configured for threadpool.  May conflict with other config, so if you need the
+     * actual value that gets passed to {@link ThreadPoolExecutor#setMaximumPoolSize(int)}, use {@link #actualMaximumSize()}
      *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> maximumSize() {
         return maximumPoolSize;
+    }
+
+    /**
+     * Given all of the thread pool configuration, what is the actual maximumSize applied to the thread pool
+     * via {@link ThreadPoolExecutor#setMaximumPoolSize(int)}
+     *
+     * Cases:
+     * 1) allowMaximumSizeToDivergeFromCoreSize == false: maximumSize is set to coreSize
+     * 2) allowMaximumSizeToDivergeFromCoreSize == true, maximumSize >= coreSize: thread pool has different core/max sizes, so return the configured max
+     * 3) allowMaximumSizeToDivergeFromCoreSize == true, maximumSize < coreSize: threadpool incorrectly configured, use coreSize for max size
+     * @return actually configured maximum size of threadpool
+     */
+    public Integer actualMaximumSize() {
+        final int coreSize = coreSize().get();
+        final int maximumSize = maximumSize().get();
+        if (getAllowMaximumSizeToDivergeFromCoreSize().get()) {
+            if (coreSize > maximumSize) {
+                return coreSize;
+            } else {
+                return maximumSize;
+            }
+        } else {
+            return coreSize;
+        }
     }
 
     /**
@@ -158,7 +182,7 @@ public abstract class HystrixThreadPoolProperties {
         return queueSizeRejectionThreshold;
     }
 
-    public boolean getAllowMaximumSizeToDivergeFromCoreSize() {
+    public HystrixProperty<Boolean> getAllowMaximumSizeToDivergeFromCoreSize() {
         return allowMaximumSizeToDivergeFromCoreSize;
     }
 
@@ -218,7 +242,7 @@ public abstract class HystrixThreadPoolProperties {
         private Integer keepAliveTimeMinutes = null;
         private Integer maxQueueSize = null;
         private Integer queueSizeRejectionThreshold = null;
-        private boolean allowMaximumSizeToDivergeFromCoreSize = false;
+        private Boolean allowMaximumSizeToDivergeFromCoreSize = null;
         private Integer rollingStatisticalWindowInMilliseconds = null;
         private Integer rollingStatisticalWindowBuckets = null;
 
@@ -245,7 +269,7 @@ public abstract class HystrixThreadPoolProperties {
             return queueSizeRejectionThreshold;
         }
 
-        public boolean getAllowMaximumSizeToDivergeFromCoreSize() {
+        public Boolean getAllowMaximumSizeToDivergeFromCoreSize() {
             return allowMaximumSizeToDivergeFromCoreSize;
         }
 

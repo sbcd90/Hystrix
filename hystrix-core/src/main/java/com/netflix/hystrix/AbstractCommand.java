@@ -17,6 +17,7 @@ package com.netflix.hystrix;
 
 import com.netflix.hystrix.HystrixCircuitBreaker.NoOpCircuitBreaker;
 import com.netflix.hystrix.HystrixCommandProperties.ExecutionIsolationStrategy;
+import com.netflix.hystrix.exception.ExceptionNotWrappedByHystrix;
 import com.netflix.hystrix.exception.HystrixBadRequestException;
 import com.netflix.hystrix.exception.HystrixRuntimeException;
 import com.netflix.hystrix.exception.HystrixRuntimeException.FailureType;
@@ -430,6 +431,11 @@ import java.util.concurrent.atomic.AtomicReference;
                 if (_cmd.commandState.compareAndSet(CommandState.OBSERVABLE_CHAIN_CREATED, CommandState.UNSUBSCRIBED)) {
                     if (!_cmd.executionResult.containsTerminalEvent()) {
                         _cmd.eventNotifier.markEvent(HystrixEventType.CANCELLED, _cmd.commandKey);
+                        try {
+                            executionHook.onUnsubscribe(_cmd);
+                        } catch (Throwable hookEx) {
+                            logger.warn("Error calling HystrixCommandExecutionHook.onUnsubscribe", hookEx);
+                        }
                         _cmd.executionResultAtTimeOfCancellation = _cmd.executionResult
                                 .addEvent((int) (System.currentTimeMillis() - _cmd.commandStartTimestamp), HystrixEventType.CANCELLED);
                     }
@@ -437,6 +443,11 @@ import java.util.concurrent.atomic.AtomicReference;
                 } else if (_cmd.commandState.compareAndSet(CommandState.USER_CODE_EXECUTED, CommandState.UNSUBSCRIBED)) {
                     if (!_cmd.executionResult.containsTerminalEvent()) {
                         _cmd.eventNotifier.markEvent(HystrixEventType.CANCELLED, _cmd.commandKey);
+                        try {
+                            executionHook.onUnsubscribe(_cmd);
+                        } catch (Throwable hookEx) {
+                            logger.warn("Error calling HystrixCommandExecutionHook.onUnsubscribe", hookEx);
+                        }
                         _cmd.executionResultAtTimeOfCancellation = _cmd.executionResult
                                 .addEvent((int) (System.currentTimeMillis() - _cmd.commandStartTimestamp), HystrixEventType.CANCELLED);
                     }
@@ -1192,12 +1203,15 @@ import java.util.concurrent.atomic.AtomicReference;
         // do this before executing fallback so it can be queried from within getFallback (see See https://github.com/Netflix/Hystrix/pull/144)
         executionResult = executionResult.addEvent((int) latency, eventType);
 
-        if (isUnrecoverable(originalException)) {
-            Exception e = originalException;
-            logger.error("Unrecoverable Error for HystrixCommand so will throw HystrixRuntimeException and not apply fallback. ", e);
+        if (shouldNotBeWrapped(originalException)){
+            /* executionHook for all errors */
+            Exception e = wrapWithOnErrorHook(failureType, originalException);
+            return Observable.error(e);
+        } else if (isUnrecoverable(originalException)) {
+            logger.error("Unrecoverable Error for HystrixCommand so will throw HystrixRuntimeException and not apply fallback. ", originalException);
 
             /* executionHook for all errors */
-            e = wrapWithOnErrorHook(failureType, e);
+            Exception e = wrapWithOnErrorHook(failureType, originalException);
             return Observable.error(new HystrixRuntimeException(failureType, this.getClass(), getLogMessagePrefix() + " " + message + " and encountered unrecoverable error.", e, null));
         } else {
             if (isRecoverableError(originalException)) {
@@ -1733,6 +1747,10 @@ import java.util.concurrent.atomic.AtomicReference;
         return Single.error(new HystrixRuntimeException(failureType, this.getClass(), getLogMessagePrefix() + " " + message + " and fallback disabled.", wrapped, null));
     }
 
+    protected boolean shouldNotBeWrapped(Throwable underlying) {
+        return underlying instanceof ExceptionNotWrappedByHystrix;
+    }
+
     /**
      * Returns true iff the t was caused by a java.lang.Error that is unrecoverable.  Note: not all java.lang.Errors are unrecoverable.
      * @see <a href="https://github.com/Netflix/Hystrix/issues/713"></a> for more context
@@ -2236,12 +2254,13 @@ import java.util.concurrent.atomic.AtomicReference;
     /**
      * Take an Exception and determine whether to throw it, its cause or a new HystrixRuntimeException.
      * <p>
-     * This will only throw an HystrixRuntimeException, HystrixBadRequestException or IllegalStateException
+     * This will only throw an HystrixRuntimeException, HystrixBadRequestException, IllegalStateException
+     * or any exception that implements ExceptionNotWrappedByHystrix.
      * 
      * @param e initial exception
      * @return HystrixRuntimeException, HystrixBadRequestException or IllegalStateException
      */
-    protected RuntimeException decomposeException(Exception e) {
+    protected Throwable decomposeException(Exception e) {
         if (e instanceof IllegalStateException) {
             return (IllegalStateException) e;
         }
@@ -2257,6 +2276,12 @@ import java.util.concurrent.atomic.AtomicReference;
         // if we have an exception we know about we'll throw it directly without the wrapper exception
         if (e.getCause() instanceof HystrixRuntimeException) {
             return (HystrixRuntimeException) e.getCause();
+        }
+        if (shouldNotBeWrapped(e)) {
+            return e;
+        }
+        if (shouldNotBeWrapped(e.getCause())) {
+            return e.getCause();
         }
         // we don't know what kind of exception this is so create a generic message and throw a new HystrixRuntimeException
         String message = getLogMessagePrefix() + " failed while executing.";
@@ -2871,6 +2896,11 @@ import java.util.concurrent.atomic.AtomicReference;
         @Override
         public <T> void onCacheHit(HystrixInvokable<T> commandInstance) {
             actual.onCacheHit(commandInstance);
+        }
+
+        @Override
+        public <T> void onUnsubscribe(HystrixInvokable<T> commandInstance) {
+            actual.onUnsubscribe(commandInstance);
         }
 
         @SuppressWarnings({ "unchecked", "rawtypes" })

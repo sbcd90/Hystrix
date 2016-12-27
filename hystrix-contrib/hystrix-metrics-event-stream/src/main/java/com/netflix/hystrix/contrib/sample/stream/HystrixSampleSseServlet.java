@@ -146,16 +146,12 @@ public abstract class HystrixSampleSseServlet extends HttpServlet {
                             @Override
                             public void onNext(String sampleDataAsString) {
                                 if (sampleDataAsString != null) {
-                                    try {
-                                        writer.print("data: " + sampleDataAsString + "\n\n");
-                                        // explicitly check for client disconnect - PrintWriter does not throw exceptions
-                                        if (writer.checkError()) {
-                                            throw new IOException("io error");
-                                        }
-                                        writer.flush();
-                                    } catch (IOException ioe) {
+                                    writer.print("data: " + sampleDataAsString + "\n\n");
+                                    // explicitly check for client disconnect - PrintWriter does not throw exceptions
+                                    if (writer.checkError()) {
                                         moreDataWillBeSent.set(false);
                                     }
+                                    writer.flush();
                                 }
                             }
                         });
@@ -163,6 +159,13 @@ public abstract class HystrixSampleSseServlet extends HttpServlet {
                 while (moreDataWillBeSent.get() && !isDestroyed) {
                     try {
                         Thread.sleep(pausePollerThreadDelayInMs);
+                        //in case stream has not started emitting yet, catch any clients which connect/disconnect before emits start
+                        writer.print("ping: \n\n");
+                        // explicitly check for client disconnect - PrintWriter does not throw exceptions
+                        if (writer.checkError()) {
+                            moreDataWillBeSent.set(false);
+                        }
+                        writer.flush();
                     } catch (InterruptedException e) {
                         moreDataWillBeSent.set(false);
                     }
