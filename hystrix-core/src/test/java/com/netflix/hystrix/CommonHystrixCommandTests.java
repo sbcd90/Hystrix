@@ -26,6 +26,7 @@ import com.netflix.hystrix.strategy.properties.HystrixProperty;
 import org.junit.Test;
 import rx.Observable;
 import rx.Scheduler;
+import rx.Single;
 import rx.Subscriber;
 import rx.functions.Action1;
 import rx.functions.Func0;
@@ -106,6 +107,33 @@ public abstract class CommonHystrixCommandTests<C extends AbstractTestHystrixCom
     }
 
     /**
+     * Run the command via {@link com.netflix.hystrix.HystrixCommand#single()}, immediately block and then assert
+     * @param command command to run
+     * @param assertion assertions to check
+     * @param isSuccess should the command succeed?
+     */
+    protected void assertBlockingSingle(C command, Action1<C> assertion, boolean isSuccess) {
+        System.out.println("Running command.single(), immediately blocking and then running assertions...");
+        if (isSuccess) {
+            try {
+                command.single().toBlocking().value();
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        } else {
+            try {
+                command.single().toBlocking().value();
+                fail("Expected a command failure!");
+            } catch (Exception ex) {
+                System.out.println("Received expected ex : " + ex);
+                ex.printStackTrace();
+            }
+        }
+
+        assertion.call(command);
+    }
+
+    /**
      * Run the command via {@link com.netflix.hystrix.HystrixCommand#observe()}, let the {@link rx.Observable} terminal
      * states unblock a {@link java.util.concurrent.CountDownLatch} and then assert
      * @param command command to run
@@ -151,6 +179,60 @@ public abstract class CommonHystrixCommandTests<C extends AbstractTestHystrixCom
         } else {
             try {
                 o.toList().toBlocking().single();
+                fail("Expected a command failure!");
+            } catch (Exception ex) {
+                System.out.println("Received expected ex : " + ex);
+                ex.printStackTrace();
+            }
+        }
+    }
+
+    /**
+     * Run the command via {@link com.netflix.hystrix.HystrixCommand#single()}, let the {@link rx.Single} terminal
+     * states unblock a {@link java.util.concurrent.CountDownLatch} and then assert
+     * @param command command to run
+     * @param assertion assertions to check
+     * @param isSuccess should the command succeed?
+     */
+    protected void assertNonBlockingSingle(C command, Action1<C> assertion, boolean isSuccess) {
+        System.out.println("Running command.single(), awaiting terminal state of Observable, then running assertions...");
+        final CountDownLatch latch = new CountDownLatch(1);
+
+        Single<Integer> o = command.single();
+
+        o.subscribe(new Subscriber<Integer>() {
+            @Override
+            public void onCompleted() {
+                latch.countDown();
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                latch.countDown();
+            }
+
+            @Override
+            public void onNext(Integer integer) {
+                //do nothing
+            }
+        });
+
+        try {
+            latch.await(3, TimeUnit.SECONDS);
+            assertion.call(command);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        if (isSuccess) {
+            try {
+                o.toBlocking().value();
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        } else {
+            try {
+                o.toBlocking().value();
                 fail("Expected a command failure!");
             } catch (Exception ex) {
                 System.out.println("Received expected ex : " + ex);

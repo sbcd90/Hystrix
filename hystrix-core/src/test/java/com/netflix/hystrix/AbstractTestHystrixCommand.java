@@ -17,7 +17,7 @@ package com.netflix.hystrix;
 
 import com.netflix.hystrix.strategy.properties.HystrixPropertiesStrategy;
 
-public interface AbstractTestHystrixCommand<R> extends HystrixObservable<R>, InspectableBuilder {
+public interface AbstractTestHystrixCommand<R> extends HystrixObservable<R>, HystrixSingle<R>, InspectableBuilder {
 
     enum ExecutionResult {
         SUCCESS, FAILURE, ASYNC_FAILURE, HYSTRIX_FAILURE, ASYNC_HYSTRIX_FAILURE, RECOVERABLE_ERROR, ASYNC_RECOVERABLE_ERROR, UNRECOVERABLE_ERROR, ASYNC_UNRECOVERABLE_ERROR, BAD_REQUEST, ASYNC_BAD_REQUEST, MULTIPLE_EMITS_THEN_SUCCESS, MULTIPLE_EMITS_THEN_FAILURE, NO_EMITS_THEN_SUCCESS
